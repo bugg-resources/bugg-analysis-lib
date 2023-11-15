@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "bugg-analyses-lib"
+version = "0.1.0"
+description = ""
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.8"
+firebase-admin = "6.2.0"
+google-cloud-storage = "2.13.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
