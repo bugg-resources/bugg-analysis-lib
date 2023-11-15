@@ -5,20 +5,22 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from google.cloud import storage
 
-# Use the application default credentials
-cred = credentials.ApplicationDefault()
-firebase_admin.initialize_app(
-    cred,
-    {
-        "projectId": "bugg-301712",
-    },
-)
+# TODO: make this a class so that DB instance is not global and always initialised
 
-db = firestore.client()
+db = None
 
 
-def getDb():
-    return db
+def initFirebase(project_id):
+    global db
+    if not firebase_admin._apps:
+        cred = credentials.ApplicationDefault()
+        firebase_admin.initialize_app(
+            cred,
+            {
+                "projectId": project_id,
+            },
+        )
+    db = firestore.client()
 
 
 def getAudioDBRecord(audioId: str):
