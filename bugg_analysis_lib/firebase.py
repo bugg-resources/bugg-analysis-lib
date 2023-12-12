@@ -6,6 +6,57 @@ from firebase_admin import credentials, firestore
 from google.cloud import storage
 
 
+@firestore.transactional
+def _mark_complete_in_transaction(
+    transaction, analysis_id: str, audio_id: str, detections: list, bf
+):
+    """
+    Marks the analysis as complete in the database.
+
+    Placed outside the class in order to use firestore.transactional decorator,
+    which doesn't seem to play well with class methods
+    """
+    audioRef = bf.db.collection("audio").document(audio_id)
+
+    snapshot = audioRef.get(transaction=transaction)
+    analysesPerformed = snapshot.get("analysesPerformed")
+
+    if analysis_id in analysesPerformed:
+        print(f"WARNING: Analysis {analysis_id} was already completed for {audio_id}")
+    else:
+        analysesPerformed.append(analysis_id)
+
+    audioRecord = snapshot.to_dict()
+    newDetectionsList = []
+
+    # Add in the old detections and merge any of the old records
+    # We merge because the analysis may be re-run after an update
+    if "detections" in audioRecord:
+        prevDetections = snapshot.get("detections")
+        for d in prevDetections:
+            match = next((x for x in detections if d["id"] == x["id"]), None)
+            print(f"match {match}")
+            if match is None:
+                newDetectionsList.append(d)
+            else:
+                # Merge the two, letting the newer one overrite the old
+                newDetectionsList.append({**d, **match})
+
+    for d in detections:
+        match = next((x for x in newDetectionsList if d["id"] == x["id"]), None)
+        if match is None:
+            newDetectionsList.append(d)
+
+    transaction.update(
+        audioRef,
+        {
+            "analysesPerformed": analysesPerformed,
+            "detections": newDetectionsList,
+            "hasDetections": len(newDetectionsList) > 0,
+        },
+    )
+
+
 class BuggFirebase:
     "A class to handle Firestore and Cloud Storage interactions"
 
@@ -68,54 +119,8 @@ class BuggFirebase:
         Updates the audio record to show that analysis is done (which will kick off other analyses)
         """
         transaction = self.db.transaction()
-        self._mark_complete_in_transaction(
-            transaction, analysis_id, audio_id, detections
-        )
-
-    @firestore.transactional
-    def _mark_complete_in_transaction(
-        self, transaction, analysis_id: str, audio_id: str, detections: list
-    ):
-        audioRef = self.db.collection("audio").document(audio_id)
-
-        snapshot = audioRef.get(transaction=transaction)
-        analysesPerformed = snapshot.get("analysesPerformed")
-
-        if analysis_id in analysesPerformed:
-            print(
-                f"WARNING: Analysis {analysis_id} was already completed for {audio_id}"
-            )
-        else:
-            analysesPerformed.append(analysis_id)
-
-        audioRecord = snapshot.to_dict()
-        newDetectionsList = []
-
-        # Add in the old detections and merge any of the old records
-        # We merge because the analysis may be re-run after an update
-        if "detections" in audioRecord:
-            prevDetections = snapshot.get("detections")
-            for d in prevDetections:
-                match = next((x for x in detections if d["id"] == x["id"]), None)
-                print(f"match {match}")
-                if match == None:
-                    newDetectionsList.append(d)
-                else:
-                    # Merge the two, letting the newer one overrite the old
-                    newDetectionsList.append({**d, **match})
-
-        for d in detections:
-            match = next((x for x in newDetectionsList if d["id"] == x["id"]), None)
-            if match == None:
-                newDetectionsList.append(d)
-
-        transaction.update(
-            audioRef,
-            {
-                "analysesPerformed": analysesPerformed,
-                "detections": newDetectionsList,
-                "hasDetections": len(newDetectionsList) > 0,
-            },
+        _mark_complete_in_transaction(
+            transaction, analysis_id, audio_id, detections, self
         )
 
     def download_audio(self, analysis_id: str, audio_record: dict) -> str:
